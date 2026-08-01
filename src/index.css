@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Inter', 'Noto Sans Thai', 'Noto Sans SC', sans-serif;
+  background-color: #FBF7EF;
+  color: #241F1C;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dark body {
+  background-color: #161311;
+  color: #EDE6DA;
+}
+
+::selection {
+  background-color: #DE7C5C;
+  color: #FBF7EF;
+}
+
+.bg-grain {
+  background-image: radial-gradient(circle at 1px 1px, rgba(36,31,28,0.05) 1px, transparent 0);
+  background-size: 18px 18px;
+}
+.dark .bg-grain {
+  background-image: radial-gradient(circle at 1px 1px, rgba(237,230,218,0.05) 1px, transparent 0);
+}
+
+.chinese-text {
+  font-family: 'Noto Sans SC', sans-serif;
+}
+
+.thai-text {
+  font-family: 'Noto Sans Thai', sans-serif;
+}
+
+.font-display {
+  font-family: 'Noto Serif TC', 'Noto Serif Thai', serif;
+}
+
+/* Card flip */
+.flip-scene {
+  perspective: 1600px;
+}
+.flip-card {
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+.flip-card.flipped {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-face-back {
+  transform: rotateY(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-card {
+    transition: none;
+  }
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Custom scrollbar, subtle */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(193, 68, 46, 0.35);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes stamp-in {
+  0% { transform: scale(1.4) rotate(-8deg); opacity: 0; }
+  60% { transform: scale(0.95) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.animate-stamp {
+  animation: stamp-in 0.35s ease-out;
+}
