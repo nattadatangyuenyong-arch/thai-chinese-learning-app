@@ -139,6 +139,17 @@ export function useDecks() {
     } : d));
   }, []);
 
+  const resetKnownItems = useCallback((deckId: string) => {
+    const now = new Date().toISOString();
+    setDecks((prev) => prev.map((d) => d.id === deckId ? {
+      ...d,
+      items: d.items.map((i) => i.learningStatus === "known"
+        ? { ...i, learningStatus: "new" as LearningStatus, updatedAt: now }
+        : i),
+      updatedAt: now,
+    } : d));
+  }, []);
+
   const retrySync = useCallback(async () => {
     if (!user) return;
     setSyncing(true);
@@ -154,7 +165,7 @@ export function useDecks() {
 
   return {
     decks, getDeck, createDeck, renameDeck, deleteDeck, importDeck, addItemsToDeck,
-    updateItem, deleteItem, setItemStatus, syncing, syncError, ready, retrySync,
+    updateItem, deleteItem, setItemStatus, resetKnownItems, syncing, syncError, ready, retrySync,
     storageMode: user ? "cloud" as const : "local" as const,
   };
 }

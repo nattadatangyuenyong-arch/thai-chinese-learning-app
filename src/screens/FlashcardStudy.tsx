@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Navbar } from "../components/Navbar";
 import { Button } from "../components/Button";
@@ -30,7 +30,7 @@ function shuffleArray<T>(arr: T[]): T[] {
 export default function FlashcardStudy() {
   const { deckId } = useParams<{ deckId: string }>();
   const navigate = useNavigate();
-  const { getDeck, setItemStatus } = useDecksContext();
+  const { getDeck, setItemStatus, resetKnownItems } = useDecksContext();
   const { showToast } = useToast();
 
   const deck = deckId ? getDeck(deckId) : undefined;
@@ -43,9 +43,19 @@ export default function FlashcardStudy() {
   const [onlyStillLearning, setOnlyStillLearning] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
 
+  // Swipe tracking. A swipe changes card; a normal tap still flips the card.
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
+
   const allItems = deck?.items ?? [];
+
+  // Normal study mode excludes cards already marked as "known".
+  // "Still learning" mode is stricter and shows only learning cards.
   const poolItems = useMemo(
-    () => (onlyStillLearning ? allItems.filter((i) => i.learningStatus === "learning") : allItems),
+    () => onlyStillLearning
+      ? allItems.filter((i) => i.learningStatus === "learning")
+      : allItems.filter((i) => i.learningStatus !== "known"),
     [allItems, onlyStillLearning]
   );
 
@@ -53,6 +63,8 @@ export default function FlashcardStudy() {
     setOrder(poolItems.map((i) => i.id));
     setIndex(0);
     setFlipped(false);
+    // Rebuild the round when entering a deck, switching study mode, or changing card count.
+    // Status changes are handled directly so remembering a card does not jump back to card 1.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckId, onlyStillLearning, allItems.length]);
 
@@ -72,7 +84,8 @@ export default function FlashcardStudy() {
     );
   }
 
-  const currentItem: VocabularyItem | undefined = order.length > 0 ? allItems.find((i) => i.id === order[index]) : undefined;
+  const safeIndex = order.length === 0 ? 0 : Math.min(index, order.length - 1);
+  const currentItem: VocabularyItem | undefined = order.length > 0 ? allItems.find((i) => i.id === order[safeIndex]) : undefined;
 
   const known = allItems.filter((i) => i.learningStatus === "known").length;
   const learning = allItems.filter((i) => i.learningStatus === "learning").length;
@@ -99,18 +112,73 @@ export default function FlashcardStudy() {
     setIndex(0);
     setFlipped(false);
     setReviewedCount(0);
-    showToast("เริ่มชุดใหม่อีกครั้ง");
+    showToast("เริ่มรอบใหม่ โดยไม่รวมคำที่จำได้แล้ว");
+  }
+
+  function handleResetKnown() {
+    if (!deckId || known === 0) return;
+    resetKnownItems(deckId);
+    setOnlyStillLearning(false);
+    setOrder(allItems.map((i) => i.id));
+    setIndex(0);
+    setFlipped(false);
+    setReviewedCount(0);
+    showToast(`นำคำที่จำได้แล้ว ${known} คำกลับมาทบทวน`);
   }
 
   function markStatus(status: "known" | "learning") {
     if (!currentItem || !deckId) return;
     setItemStatus(deckId, currentItem.id, status);
     setReviewedCount((c) => c + 1);
+
+    if (status === "known") {
+      // Remove the remembered card immediately from the current round.
+      setOrder((prev) => prev.filter((id) => id !== currentItem.id));
+      setIndex((i) => {
+        const nextLength = Math.max(0, order.length - 1);
+        if (nextLength === 0) return 0;
+        return Math.min(i, nextLength - 1);
+      });
+      setFlipped(false);
+      return;
+    }
+
     goNext();
   }
 
   function handleSpeak() {
     if (currentItem) speakChinese(currentItem.chinese);
+  }
+
+  function handleTouchStart(e: React.TouchEvent<HTMLButtonElement>) {
+    const touch = e.touches[0];
+    touchStartX.current = touch.clientX;
+    touchStartY.current = touch.clientY;
+    suppressClickRef.current = false;
+  }
+
+  function handleTouchEnd(e: React.TouchEvent<HTMLButtonElement>) {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartX.current;
+    const dy = touch.clientY - touchStartY.current;
+    touchStartX.current = null;
+    touchStartY.current = null;
+
+    // Require a clear horizontal swipe so normal taps and vertical scrolling still work.
+    if (Math.abs(dx) < 55 || Math.abs(dx) <= Math.abs(dy)) return;
+
+    suppressClickRef.current = true;
+    if (dx < 0) goNext(); // swipe left -> next
+    else goPrev(); // swipe right -> previous
+  }
+
+  function handleCardClick() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setFlipped((f) => !f);
   }
 
   if (allItems.length === 0) {
@@ -136,14 +204,14 @@ export default function FlashcardStudy() {
         {/* Progress */}
         <div className="flex items-center justify-between text-sm text-ink/60 dark:text-ink-light/60 mb-2">
           <span>
-            การ์ดที่ {order.length === 0 ? 0 : index + 1} / {order.length}
+            การ์ดที่ {order.length === 0 ? 0 : safeIndex + 1} / {order.length}
           </span>
           <span>ทบทวนแล้ว {reviewedCount} ครั้ง</span>
         </div>
         <div className="h-2 rounded-full bg-ink/10 dark:bg-white/10 overflow-hidden mb-4">
           <div
             className="h-full bg-seal-500 rounded-full transition-all"
-            style={{ width: `${order.length === 0 ? 0 : ((index + 1) / order.length) * 100}%` }}
+            style={{ width: `${order.length === 0 ? 0 : ((safeIndex + 1) / order.length) * 100}%` }}
           />
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold mb-5">
@@ -155,33 +223,47 @@ export default function FlashcardStudy() {
         </div>
 
         {/* Mode toggles */}
-        <div className="flex flex-wrap gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-4">
           <ToggleChip active={reverseMode} onClick={() => { setReverseMode((v) => !v); setFlipped(false); }} label="โหมดกลับด้าน (ไทย → จีน)" />
           <ToggleChip active={pinyinVisible} onClick={() => setPinyinVisible((v) => !v)} label="แสดงพินอิน" />
           <ToggleChip
             active={onlyStillLearning}
             onClick={() => setOnlyStillLearning((v) => !v)}
-            label={`ทบทวนเฉพาะ "กำลังเรียนรู้" (${learning})`}
+            label={`ทบทวนเฉพาะ \"กำลังเรียนรู้\" (${learning})`}
             disabled={learning === 0 && !onlyStillLearning}
           />
         </div>
 
+        {known > 0 && (
+          <div className="mb-6">
+            <Button variant="secondary" size="sm" icon={<RefreshIcon width={16} height={16} />} onClick={handleResetKnown}>
+              รีเซ็ตคำที่จำได้ ({known})
+            </Button>
+          </div>
+        )}
+
         {order.length === 0 ? (
           <EmptyState
             icon={<CheckIcon width={26} height={26} />}
-            title="ไม่มีการ์ดให้ทบทวนในโหมดนี้"
-            message='ยังไม่มีคำที่อยู่ในสถานะ "กำลังเรียนรู้" ลองปิดตัวกรองนี้'
-            action={<Button onClick={() => setOnlyStillLearning(false)}>แสดงการ์ดทั้งหมด</Button>}
+            title={known === allItems.length ? "จำได้ครบทุกคำแล้ว 🎉" : "ไม่มีการ์ดให้ทบทวนในโหมดนี้"}
+            message={known === allItems.length
+              ? "กดรีเซ็ตด้านบนเมื่อต้องการนำทุกคำกลับมาทบทวนอีกครั้ง"
+              : 'ยังไม่มีคำที่อยู่ในสถานะ "กำลังเรียนรู้" ลองปิดตัวกรองนี้'}
+            action={known === allItems.length
+              ? <Button onClick={handleResetKnown}>รีเซ็ตและทบทวนใหม่</Button>
+              : <Button onClick={() => setOnlyStillLearning(false)}>แสดงการ์ดที่ยังไม่จำ</Button>}
           />
         ) : (
           currentItem && (
             <>
               {/* Flashcard */}
-              <div className="flip-scene mb-6">
+              <div className="flip-scene mb-3">
                 <button
-                  onClick={() => setFlipped((f) => !f)}
-                  aria-label="พลิกการ์ด"
-                  className={`flip-card relative w-full aspect-[4/3] sm:aspect-[16/10] ${flipped ? "flipped" : ""}`}
+                  onClick={handleCardClick}
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                  aria-label="พลิกการ์ด ปัดซ้ายหรือขวาเพื่อเปลี่ยนคำ"
+                  className={`flip-card relative w-full aspect-[4/3] sm:aspect-[16/10] touch-pan-y select-none ${flipped ? "flipped" : ""}`}
                 >
                   {/* Front */}
                   <div className="flip-face absolute inset-0 rounded-3xl bg-white dark:bg-[#211C18] border border-ink/10 dark:border-white/10 shadow-xl flex flex-col items-center justify-center p-8">
@@ -238,12 +320,13 @@ export default function FlashcardStudy() {
                   </div>
                 </button>
               </div>
+              <p className="text-center text-xs text-ink/40 dark:text-ink-light/40 mb-5">ปัดซ้ายเพื่อไปคำถัดไป · ปัดขวาเพื่อย้อนกลับ</p>
 
               {/* Nav controls */}
               <div className="flex items-center justify-center gap-3 mb-6">
                 <IconButton onClick={goPrev} label="การ์ดก่อนหน้า"><ChevronLeftIcon /></IconButton>
                 <IconButton onClick={handleShuffle} label="สลับการ์ด"><ShuffleIcon /></IconButton>
-                <IconButton onClick={handleRestart} label="เริ่มใหม่"><RefreshIcon /></IconButton>
+                <IconButton onClick={handleRestart} label="เริ่มรอบใหม่"><RefreshIcon /></IconButton>
                 <IconButton onClick={goNext} label="การ์ดถัดไป"><ChevronRightIcon /></IconButton>
               </div>
 
